@@ -1,53 +1,54 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 from transformers import pipeline
-from vader_service import VaderService
+from services.vader_service import VaderService  # updated path
+import os
 
 app = Flask(__name__)
 CORS(app,resources={r"/*": {"origins": "*"}})
 
 # Load models once at startup
-analyzer = SentimentIntensityAnalyzer()
 sentiment_model = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
 emotion_model = pipeline("zero-shot-classification", model="facebook/bart-large-mnli")
+vader_service = VaderService()
 
 EMOTIONS = ["joy", "sadness", "anger", "fear", "surprise", "love", "neutral"]
 
 @app.route('/predict', methods=['POST'])
 def predict():
-    data = request.get_json()
-    text = data.get('text', '')
-    if not text:
-        return jsonify({'error': 'No text provided'}), 400
+    if not request.is_json:
+        return jsonify({'error': 'Request must be in JSON format'}), 415
 
-    # Sentiment (transformers)
-    sentiment_result = sentiment_model(text)[0]
-    sentiment = sentiment_result['label']
+    try:
+        data = request.get_json()
+        text = data.get('text', '').strip()
+        if not text:
+            return jsonify({'error': 'No text provided'}), 400
 
-    # Emotion (zero-shot)
-    emotion_result = emotion_model(text, EMOTIONS)
-    emotion = emotion_result['labels'][0].capitalize()
+        sentiment = sentiment_model(text)[0]['label']
+        emotion = emotion_model(text, EMOTIONS)['labels'][0].capitalize()
 
-    return jsonify({
-        'sentiment': sentiment,
-        'emotion': emotion
-    })
-
-
-
-vader_service = VaderService()
+        return jsonify({'sentiment': sentiment, 'emotion': emotion})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/vader/analyze', methods=['POST'])
 def vader_analyze():
-    data = request.get_json()
-    text = data.get('text', '')
-    if not text:
-        return jsonify({'error': 'No text provided'}), 400
+    if not request.is_json:
+        return jsonify({'error': 'Request must be in JSON format'}), 415
 
-    sentiment = vader_service.analyze(text)
-    return jsonify({'sentiment': sentiment})
+    try:
+        data = request.get_json()
+        text = data.get('text', '').strip()
+        if not text:
+            return jsonify({'error': 'No text provided'}), 400
 
+        result = vader_service.analyze(text)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(port=5001, debug=True) 
+    port = int(os.environ.get("PORT", 5001))
+    app.run(port=port, debug=True)
+
